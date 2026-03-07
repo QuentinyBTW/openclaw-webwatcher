@@ -1,0 +1,27 @@
+{
+  "name": "openclaw-webwatcher",
+  "version": "1.0.0",
+  "description": "智能网页监控技能 - OpenClaw 展示项目",
+  "main": "webwatcher.js",
+  "bin": {
+    "webwatcher": "./webwatcher.js"
+  },
+  "scripts": {
+    "test": "node webwatcher.js check --url https://example.com"
+  },
+  "keywords": [
+    "openclaw",
+    "web-monitoring",
+    "price-tracker",
+    "automation"
+  ],
+  "author": "你的名字",
+  "license": "MIT",
+  "dependencies": {
+    "axios": "^1.6.0",
+    "cheerio": "^1.0.0-rc.12"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  }
+}

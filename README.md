@@ -30,15 +30,26 @@ npm install
 ### 基础使用
 
 ```bash
-# 检查单个页面
-node webwatcher.js check --url "https://example.com"
+# 第一步：启动支持远程调试的浏览器
+node webwatcher.js browser
 
-# 监控价格（每30分钟检查一次）
-node webwatcher.js price --url "https://item.jd.com/123.html" --target 999
+# 在打开的浏览器中手动登录目标网站（如京东）
+
+# 检查单个页面价格
+node webwatcher.js check --url "https://item.jd.com/123.html" --type price
+
+# 监控价格（每 5 分钟检查一次，低于目标价时通知）
+node webwatcher.js price --url "https://item.jd.com/123.html" --target 999 --interval 5m
 
 # 持续监控内容变化
 node webwatcher.js monitor --url "https://blog.example.com" --interval 1h
 ```
+
+> **注意：** `browser` 命令使用 `open -a "Google Chrome"` 启动浏览器。如果启动失败，可以手动在终端运行：
+>
+> ```bash
+> open -a "Google Chrome" --args --remote-debugging-port=9222 --user-data-dir="$HOME/.openclaw/workspace/data/webwatcher/browser-data"
+> ```
 
 ## 📖 使用场景
 
@@ -47,11 +58,14 @@ node webwatcher.js monitor --url "https://blog.example.com" --interval 1h
 监控京东、淘宝等电商平台商品价格，降价时自动通知：
 
 ```bash
+# 启动浏览器并登录京东
+node webwatcher.js browser
+
+# 每 5 分钟检查一次，低于目标价时通知
 node webwatcher.js price \
-  --url "https://item.jd.com/100012345678.html" \
-  --target 6999 \
-  --interval 30m \
-  --name "iPhone 15 Pro"
+  --url "https://item.jd.com/100327533584.html" \
+  --target 3500 \
+  --interval 5m
 ```
 
 ### 2. 招聘信息监控
@@ -88,10 +102,11 @@ node webwatcher.js monitor \
 
 ## 🎯 技术亮点
 
-1. **智能内容提取** - 自动识别价格、标题等关键信息
-2. **变化检测** - 基于内容哈希的高效变化检测
-3. **历史记录** - 完整的变化历史和页面快照
-4. **可扩展性** - 易于集成更多通知渠道和提取规则
+1. **真实浏览器驱动** - 通过 puppeteer 连接已有 Chrome 实例，利用已登录状态，绕过反爬虫限制
+2. **智能内容提取** - 自动识别价格、标题等关键信息
+3. **变化检测** - 基于内容哈希的高效变化检测
+4. **历史记录** - 完整的变化历史和页面快照
+5. **可扩展性** - 易于集成更多通知渠道和提取规则
 
 ## 📊 数据存储
 
@@ -99,7 +114,6 @@ node webwatcher.js monitor \
 
 ```
 webwatcher/
-├── tasks.json          # 监控任务列表
 ├── history/            # 变化历史
 │   └── task-xxx.json
 └── snapshots/          # 页面快照
@@ -107,6 +121,14 @@ webwatcher/
 ```
 
 ## 🔧 高级配置
+
+### 时间间隔格式
+
+| 格式 | 说明 | 示例 |
+|------|------|------|
+| `Nm` | N 分钟 | `5m`、`30m` |
+| `Nh` | N 小时 | `1h`、`6h` |
+| `Nd` | N 天 | `1d` |
 
 ### 自定义选择器
 

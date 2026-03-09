@@ -11,12 +11,23 @@ const fs = require('fs').promises;
 const path = require('path');
 const crypto = require('crypto');
 
+// 检查是否安装了 puppeteer
+let puppeteer = null;
+try {
+  puppeteer = require('puppeteer');
+} catch (e) {
+  // puppeteer 未安装
+}
+
 // 配置
 const CONFIG = {
   dataDir: path.join(process.env.HOME, '.openclaw/workspace/data/webwatcher'),
   tasksFile: 'tasks.json',
   historyDir: 'history',
-  snapshotsDir: 'snapshots'
+  snapshotsDir: 'snapshots',
+  cookiesFile: 'cookies.json',
+  userDataDir: path.join(process.env.HOME, '.openclaw/workspace/data/webwatcher/browser-data'),
+  debugPort: 9222 // 远程调试端口
 };
 
 // 初始化数据目录
@@ -24,10 +35,233 @@ async function initDataDir() {
   await fs.mkdir(CONFIG.dataDir, { recursive: true });
   await fs.mkdir(path.join(CONFIG.dataDir, CONFIG.historyDir), { recursive: true });
   await fs.mkdir(path.join(CONFIG.dataDir, CONFIG.snapshotsDir), { recursive: true });
+  await fs.mkdir(CONFIG.userDataDir, { recursive: true });
+}
+
+// 加载 Cookies
+async function loadCookies() {
+  try {
+    const cookiesPath = path.join(CONFIG.dataDir, CONFIG.cookiesFile);
+    const cookiesString = await fs.readFile(cookiesPath, 'utf-8');
+    return JSON.parse(cookiesString);
+  } catch (error) {
+    return null;
+  }
+}
+
+// 保存 Cookies
+async function saveCookies(cookies) {
+  const cookiesPath = path.join(CONFIG.dataDir, CONFIG.cookiesFile);
+  await fs.writeFile(cookiesPath, JSON.stringify(cookies, null, 2));
+}
+
+// 启动浏览器（支持远程调试）
+async function startBrowser() {
+  const { exec } = require('child_process');
+  const { promisify } = require('util');
+  const execAsync = promisify(exec);
+
+  console.log('🚀 启动支持远程调试的 Chrome...');
+  console.log(`📡 调试端口: ${CONFIG.debugPort}`);
+  console.log('');
+
+  // 先确保没有已运行的 Chrome 实例占用调试端口
+  const command = `open -a "Google Chrome" --args --remote-debugging-port=${CONFIG.debugPort} --user-data-dir="${CONFIG.userDataDir}"`;
+
+  try {
+    await execAsync(command);
+    console.log('✅ Chrome 已启动，等待就绪...');
+    await new Promise(resolve => setTimeout(resolve, 3000));
+    console.log('💡 请在浏览器中登录需要监控的网站，然后运行监控命令');
+    console.log('');
+    console.log('示例：');
+    console.log('  node webwatcher.js price --url "https://item.jd.com/100327533584.html" --target 999');
+  } catch (error) {
+    console.error(`❌ 启动失败: ${error.message}`);
+    console.log('');
+    console.log('💡 请手动在终端运行以下命令启动 Chrome：');
+    console.log(`   open -a "Google Chrome" --args --remote-debugging-port=${CONFIG.debugPort} --user-data-dir="${CONFIG.userDataDir}"`);
+    process.exit(1);
+  }
+}
+
+// 登录并保存 Cookies
+async function loginAndSaveCookies(url) {
+  const { exec } = require('child_process');
+  const { promisify } = require('util');
+  const execAsync = promisify(exec);
+
+  console.log('🌐 使用系统浏览器打开页面...');
+  console.log(`📱 URL: ${url}`);
+  console.log('');
+  console.log('请按以下步骤操作：');
+  console.log('1. 在打开的浏览器中登录网站');
+  console.log('2. 登录成功后，打开浏览器的开发者工具（F12 或 Cmd+Option+I）');
+  console.log('3. 切换到 Console（控制台）标签');
+  console.log('4. 复制并执行以下代码来获取 Cookies：');
+  console.log('');
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  console.log('copy(JSON.stringify(document.cookie.split("; ").map(c => {');
+  console.log('  const [name, ...v] = c.split("=");');
+  console.log('  return {');
+  console.log('    name,');
+  console.log('    value: v.join("="),');
+  console.log('    domain: location.hostname,');
+  console.log('    path: "/"');
+  console.log('  };');
+  console.log('})))');
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  console.log('');
+  console.log('5. 执行后 Cookies 会自动复制到剪贴板');
+  console.log('6. 回到这里，粘贴 Cookies 内容，然后按 Enter：');
+  console.log('');
+
+  // 使用 open 命令打开浏览器
+  try {
+    await execAsync(`open "${url}"`);
+  } catch (error) {
+    console.error(`❌ 打开浏览器失败: ${error.message}`);
+    process.exit(1);
+  }
+
+  // 等待用户输入 cookies
+  const readline = require('readline');
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout
+  });
+
+  const cookiesJson = await new Promise(resolve => {
+    rl.question('', answer => {
+      rl.close();
+      resolve(answer.trim());
+    });
+  });
+
+  try {
+    const cookies = JSON.parse(cookiesJson);
+    await saveCookies(cookies);
+    console.log(`\n✅ 已保存 ${cookies.length} 个 Cookies`);
+    console.log(`📁 保存位置: ${path.join(CONFIG.dataDir, CONFIG.cookiesFile)}`);
+  } catch (error) {
+    console.error(`\n❌ 解析 Cookies 失败: ${error.message}`);
+    console.error('请确保粘贴的是有效的 JSON 格式');
+    process.exit(1);
+  }
 }
 
 // 获取网页内容
-async function fetchPage(url) {
+async function fetchPage(url, useBrowser = false) {
+  // 如果需要使用浏览器且 puppeteer 可用
+  if (useBrowser && puppeteer) {
+    let browser;
+    try {
+      // 尝试连接到已有的浏览器实例
+      try {
+        browser = await puppeteer.connect({
+          browserURL: `http://localhost:${CONFIG.debugPort}`
+        });
+        console.log('✅ 已连接到现有浏览器实例');
+      } catch (connectError) {
+        console.log('⚠️ 无法连接到现有浏览器，正在启动新浏览器...');
+        console.log('💡 提示：你可以先运行以下命令启动浏览器：');
+        console.log(`   /Applications/Google\\ Chrome.app/Contents/MacOS/Google\\ Chrome --remote-debugging-port=${CONFIG.debugPort} --user-data-dir="${CONFIG.userDataDir}"`);
+        console.log('');
+
+        // 启动新的浏览器实例
+        browser = await puppeteer.launch({
+          headless: false,
+          userDataDir: CONFIG.userDataDir,
+          args: [
+            `--remote-debugging-port=${CONFIG.debugPort}`,
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-blink-features=AutomationControlled'
+          ]
+        });
+        console.log('✅ 已启动新浏览器实例');
+      }
+
+      const pages = await browser.pages();
+      let page;
+
+      // 查找是否已经有打开的目标页面
+      const existingPage = pages.find(p => p.url().includes(new URL(url).hostname));
+
+      if (existingPage) {
+        page = existingPage;
+      } else {
+        page = await browser.newPage();
+        console.log('✅ 创建新标签页');
+        await page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+      }
+
+      // 用 CDP 导航，完全控制超时
+      const client = await page.createCDPSession();
+      await client.send('Page.enable');
+      await client.send('Page.navigate', { url });
+
+      // 等待页面加载或超时
+      await Promise.race([
+        new Promise(resolve => client.once('Page.loadEventFired', resolve)),
+        new Promise(resolve => setTimeout(resolve, 8000))
+      ]);
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      console.log('✅ 页面已加载');
+
+      // 针对京东，额外等待价格元素
+      if (url.includes('jd.com')) {
+        try {
+          await page.waitForSelector('.p-price, [class*="price"]', { timeout: 8000 });
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        } catch (e) {
+          console.log('⚠️ 等待价格元素超时');
+        }
+      }
+
+      // 用 Runtime.evaluate 取页面内容（比 DOM.getOuterHTML 更快）
+      const result = await Promise.race([
+        client.send('Runtime.evaluate', {
+          expression: 'document.documentElement.outerHTML',
+          returnByValue: true,
+          timeout: 5000
+        }),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Runtime.evaluate 超时')), 6000))
+      ]);
+      await client.detach();
+      const html = result.result.value;
+      // 注意：不关闭浏览器，保持连接
+      return { html, page, browser: null }; // browser 设为 null 避免被关闭
+    } catch (error) {
+      if (browser) {
+        try {
+          await browser.disconnect();
+        } catch (e) {
+          // 忽略断开连接的错误
+        }
+      }
+      console.log(`⚠️ 浏览器模式失败，回退到普通模式: ${error.message}`);
+    }
+  }
+
+  // headless 浏览器模式（用于动态内容，不需要登录状态）
+  if (puppeteer) {
+    let browser;
+    try {
+      browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox'] });
+      const page = await browser.newPage();
+      await page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+      await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 });
+      const html = await page.content();
+      await browser.close();
+      return { html, page: null, browser: null };
+    } catch (error) {
+      if (browser) await browser.close().catch(() => {});
+      console.log(`⚠️ headless 浏览器失败，回退到普通模式: ${error.message}`);
+    }
+  }
+
+  // 普通 HTTP 请求
   try {
     const response = await axios.get(url, {
       headers: {
@@ -35,7 +269,7 @@ async function fetchPage(url) {
       },
       timeout: 10000
     });
-    return response.data;
+    return { html: response.data, page: null, browser: null };
   } catch (error) {
     throw new Error(`获取页面失败: ${error.message}`);
   }
@@ -44,23 +278,127 @@ async function fetchPage(url) {
 // 提取内容
 function extractContent(html, selector = null) {
   const $ = cheerio.load(html);
-  
+
   if (selector) {
-    return $(selector).text().trim();
+    return $(selector).map((i, el) => $(el).text().trim()).get().join('\n');
   }
-  
-  // 默认提取主要内容
+
+  // 默认提取：移除 script/style 后取全部 body 文本
+  $('script, style, noscript').remove();
+  const bodyText = $('body').text().replace(/\s+/g, ' ').trim();
+
   return {
     title: $('title').text().trim(),
-    h1: $('h1').first().text().trim(),
-    body: $('body').text().substring(0, 500).trim()
+    body: bodyText
   };
 }
 
 // 提取价格
-function extractPrice(html) {
+async function extractPrice(html, url, page = null) {
+  // 如果有 puppeteer page 对象，直接在浏览器中提取
+  if (page && (url.includes('jd.com') || url.includes('steampowered.com'))) {
+    try {
+      const price = await page.evaluate(() => {
+        // Steam 特殊处理
+        if (window.location.hostname.includes('steampowered.com')) {
+          // Steam 免费游戏
+          const freeText = document.querySelector('.game_purchase_price, [class*="free"]');
+          if (freeText && (freeText.textContent.includes('免费') || freeText.textContent.includes('Free'))) {
+            return 0; // 免费游戏返回 0
+          }
+          // Steam 价格元素
+          const steamPriceEl = document.querySelector('.game_purchase_price, .discount_final_price, [class*="price"]');
+          if (steamPriceEl) {
+            const text = steamPriceEl.textContent || steamPriceEl.innerText;
+            // 匹配 ¥103.00 或 $19.99 等格式
+            const match = text.match(/[¥$€£]?\s*([\d,]+\.?\d*)/);
+            if (match) return parseFloat(match[1].replace(/,/g, ''));
+          }
+          return null;
+        }
+        
+        // 京东价格选择器
+        const priceEl = document.querySelector('.p-price .price, .price-now, [class*="price"]');
+        if (priceEl) {
+          const text = priceEl.textContent || priceEl.innerText;
+          const match = text.match(/[\d,]+\.?\d*/);
+          if (match) return parseFloat(match[0].replace(/,/g, ''));
+        }
+        return null;
+      });
+      if (price !== null) return price;
+    } catch (error) {
+      console.log(`⚠️ 浏览器内提取价格失败: ${error.message}`);
+    }
+  }
+
   const $ = cheerio.load(html);
-  
+
+  // 京东特殊处理 - API 方式
+  if (url.includes('jd.com') || url.includes('item.jd.com')) {
+    const skuMatch = url.match(/\/(\d+)\.html/);
+    if (skuMatch) {
+      const skuId = skuMatch[1];
+
+      // 尝试多个京东价格接口
+      const priceUrls = [
+        `https://p.3.cn/prices/mgets?skuIds=J_${skuId}`,
+        `https://item-soa.jd.com/getWareBusiness?skuId=${skuId}`,
+        `https://c0.3.cn/stock?skuId=${skuId}&area=1_72_2799_0&cat=1,1,1`
+      ];
+
+      for (const priceUrl of priceUrls) {
+        try {
+          const response = await axios.get(priceUrl, {
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+              'Referer': url
+            },
+            timeout: 5000
+          });
+
+          // 解析不同接口的响应
+          if (response.data) {
+            if (Array.isArray(response.data) && response.data[0]?.p) {
+              return parseFloat(response.data[0].p);
+            }
+            if (response.data.price) {
+              return parseFloat(response.data.price);
+            }
+          }
+        } catch (error) {
+          // 静默失败，尝试下一个接口
+        }
+      }
+    }
+  }
+
+  // Steam 特殊处理
+  if (url.includes('steampowered.com')) {
+    // 检查是否是免费游戏
+    const pageText = $('body').text();
+    if (pageText.includes('免费开玩') || pageText.includes('Free to Play')) {
+      return 0; // 免费游戏
+    }
+    
+    // 尝试提取价格
+    const steamSelectors = [
+      '.game_purchase_price',
+      '.discount_final_price', 
+      '.discount_original_price',
+      '[class*="game_purchase"]'
+    ];
+    
+    for (const selector of steamSelectors) {
+      const text = $(selector).first().text();
+      // 匹配 ¥103.00, $19.99, €15.99 等格式
+      const match = text.match(/[¥$€£]\s*([\d,]+\.?\d*)/);
+      if (match) {
+        return parseFloat(match[1].replace(/,/g, ''));
+      }
+    }
+  }
+
   // 常见价格选择器
   const priceSelectors = [
     '.price',
@@ -69,7 +407,7 @@ function extractPrice(html) {
     '[id*="price"]',
     '.p-price'
   ];
-  
+
   for (const selector of priceSelectors) {
     const text = $(selector).first().text();
     const match = text.match(/[\d,]+\.?\d*/);
@@ -77,7 +415,7 @@ function extractPrice(html) {
       return parseFloat(match[0].replace(/,/g, ''));
     }
   }
-  
+
   return null;
 }
 
@@ -141,31 +479,38 @@ async function sendNotification(message, channels = ['console']) {
 // 检查单个页面
 async function checkPage(url, options = {}) {
   console.log(`🔍 检查页面: ${url}`);
-  
-  const html = await fetchPage(url);
+
+  // 价格监控用已有浏览器（需要登录状态），内容监控用 headless 浏览器
+  const useConnectedBrowser = options.type === 'price' || options.browser === 'true';
+  const { html, page, browser } = await fetchPage(url, useConnectedBrowser);
   const taskId = crypto.createHash('md5').update(url).digest('hex').substring(0, 8);
-  
+
   let result = {};
-  
-  if (options.type === 'price') {
-    const price = extractPrice(html);
-    result = { price };
-    console.log(`💰 当前价格: ${price || '未找到'}`);
-  } else if (options.selector) {
-    const content = extractContent(html, options.selector);
-    result = { content };
-    console.log(`📄 提取内容: ${content.substring(0, 100)}...`);
-  } else {
-    result = extractContent(html);
-    console.log(`📄 页面标题: ${result.title}`);
+
+  try {
+    if (options.type === 'price') {
+      const price = await extractPrice(html, url, page);
+      result = { price };
+      console.log(`💰 当前价格: ${price || '未找到'}`);
+    } else if (options.selector) {
+      const content = extractContent(html, options.selector);
+      result = { content };
+      console.log(`📄 提取内容: ${content.substring(0, 100)}...`);
+    } else {
+      result = extractContent(html);
+      console.log(`📄 页面标题: ${result.title}`);
+    }
+
+    // 保存快照
+    await saveSnapshot(taskId, html);
+
+    // 保存历史
+    await saveHistory(taskId, result);
+  } finally {
+    // 确保关闭浏览器
+    if (browser) await browser.close();
   }
-  
-  // 保存快照
-  await saveSnapshot(taskId, html);
-  
-  // 保存历史
-  await saveHistory(taskId, result);
-  
+
   return result;
 }
 
@@ -256,6 +601,18 @@ async function main() {
   
   try {
     switch (command) {
+      case 'browser':
+        await startBrowser();
+        break;
+
+      case 'login':
+        if (!options.url) {
+          console.error('❌ 缺少 --url 参数');
+          process.exit(1);
+        }
+        await loginAndSaveCookies(options.url);
+        break;
+
       case 'check':
         if (!options.url) {
           console.error('❌ 缺少 --url 参数');
@@ -298,20 +655,30 @@ async function main() {
 WebWatcher - 智能网页监控工具
 
 用法:
+  node webwatcher.js browser
   node webwatcher.js check --url <url>
   node webwatcher.js monitor --url <url> [--interval 30m]
-  node webwatcher.js price --url <url> --target <price>
+  node webwatcher.js price --url <url> --target <price> [--interval 30m]
   node webwatcher.js content --url <url>
 
 示例:
-  # 检查页面
-  node webwatcher.js check --url "https://example.com"
-  
-  # 监控价格
-  node webwatcher.js price --url "https://jd.com/product" --target 999
-  
-  # 持续监控
+  # 启动支持远程调试的浏览器（首次使用）
+  node webwatcher.js browser
+
+  # 检查页面价格
+  node webwatcher.js check --url "https://item.jd.com/100327533584.html" --type price
+
+  # 监控价格（每 5 分钟检查一次）
+  node webwatcher.js price --url "https://item.jd.com/100327533584.html" --target 999 --interval 5m
+
+  # 持续监控内容变化
   node webwatcher.js monitor --url "https://blog.com" --interval 1h
+
+说明:
+  - 首次使用需要先运行 'browser' 命令启动浏览器
+  - 在浏览器中手动登录需要监控的网站
+  - 之后运行监控命令会自动连接到该浏览器实例
+  - 浏览器保持打开状态，可以随时查看监控页面
         `);
     }
   } catch (error) {

